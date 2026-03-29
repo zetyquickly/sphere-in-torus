@@ -179,6 +179,33 @@ export const SphereWireframeData = (radius: number, u: number, v: number, center
     return new Float32Array(pp.flat());
 };
 
+// Solid sphere with UV coordinates for texture mapping — [x, y, z, u, v] per vertex, stride 20
+export const SphereSolidData = (radius: number, uCount: number, vCount: number, center: vec3 = [0, 0, 0]) => {
+    if (uCount < 2 || vCount < 2) return;
+    const pts: { pos: vec3, u: number, v: number }[][] = [];
+    for (let i = 0; i <= uCount; i++) {
+        const row: { pos: vec3, u: number, v: number }[] = [];
+        for (let j = 0; j <= vCount; j++) {
+            const pos = SpherePosition(radius, i * 180 / uCount, j * 360 / vCount, center);
+            row.push({ pos, u: j / vCount, v: i / uCount });
+        }
+        pts.push(row);
+    }
+    const pp: number[] = [];
+    for (let i = 0; i < uCount; i++) {
+        for (let j = 0; j < vCount; j++) {
+            const p00 = pts[i][j], p10 = pts[i+1][j], p01 = pts[i][j+1], p11 = pts[i+1][j+1];
+            pp.push(p00.pos[0], p00.pos[1], p00.pos[2], p00.u, p00.v);
+            pp.push(p10.pos[0], p10.pos[1], p10.pos[2], p10.u, p10.v);
+            pp.push(p11.pos[0], p11.pos[1], p11.pos[2], p11.u, p11.v);
+            pp.push(p00.pos[0], p00.pos[1], p00.pos[2], p00.u, p00.v);
+            pp.push(p11.pos[0], p11.pos[1], p11.pos[2], p11.u, p11.v);
+            pp.push(p01.pos[0], p01.pos[1], p01.pos[2], p01.u, p01.v);
+        }
+    }
+    return new Float32Array(pp);
+};
+
 export const TorusWireframeData = (R: number, r: number, N: number, n: number, center: vec3 = [0, 0, 0], color: vec3 = [1, 1, 1]) => {
     if (n < 2 || N < 2) return;
     let pts = [];

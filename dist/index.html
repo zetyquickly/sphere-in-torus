@@ -21,9 +21,17 @@
          <label for="tumble-speed">Tumble speed: <span id="tumble-speed-val">0.003</span></label><br>
          <input id="tumble-speed" type="range" min="0" max="0.05" step="0.001" value="0.003" style="width:80%"><br>
          <small><i>Rate at which the torus rotation axis shifts each frame</i></small><br><br>
+         <label for="sim-steps">Sim steps/frame: <span id="sim-steps-val">1</span></label><br>
+         <input id="sim-steps" type="range" min="1" max="50" step="1" value="1" style="width:80%"><br><br>
 <label for="friction">Friction (μ): <span id="friction-val">0.01</span></label><br>
          <input id="friction" type="range" min="0" max="1" step="0.01" value="0.01" style="width:80%"><br>
          <small><i>How much spin the wall imparts on each collision; 0 = frictionless</i></small>
+         <br><br>
+         <b>v</b> <span id="vel-mag"></span><br>
+         <small>x <span id="vel-x"></span> &nbsp; y <span id="vel-y"></span> &nbsp; z <span id="vel-z"></span></small>
+         <br><br>
+         <b>ω</b> <span id="omega-mag"></span><br>
+         <small>x <span id="omega-x"></span> &nbsp; y <span id="omega-y"></span> &nbsp; z <span id="omega-z"></span></small>
       </div>
       <div class="item2">
          <canvas id="canvas-webgpu"></canvas>

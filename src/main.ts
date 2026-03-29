@@ -1,7 +1,7 @@
 import { InitGPU, CreateGPUBuffer, CreateGPUBufferUint, CreateTransforms, CreateViewProjection, CreateAnimation } from './helper';
 import { Shaders } from './shaders';
 import { vec3, mat4, quat } from 'gl-matrix';
-import { TorusWireframeData, SphereWireframeData } from './vertex_data';
+import { TorusWireframeData, SphereSolidData } from './vertex_data';
 import "./site.css";
 
 const Create3DObject = async (isAnimation = true) => {
@@ -14,18 +14,17 @@ const Create3DObject = async (isAnimation = true) => {
     let r = parseFloat(tubeRadiusInput.value);
     let N = 20, n = 20;
     let torusColor: vec3 = vec3.fromValues(1, 0, 0);
-    let sphereColor: vec3 = vec3.fromValues(0, 1, 0);
-    let torusCenter: vec3 = [0, 0, 0], sphereCenter: vec3 = [0, 0, 0];
+    let torusCenter: vec3 = [0, 0, 0];
     const sphereRadiusInput = document.getElementById('sphere-radius') as HTMLInputElement;
     let sphereRadius = parseFloat(sphereRadiusInput.value);
     const torusWireframeData = TorusWireframeData(R, r, N, n, torusCenter, torusColor) as Float32Array;
-    const sphereWireframeData = SphereWireframeData(sphereRadius, 20, 20, sphereCenter, sphereColor) as Float32Array;
+    const sphereSolidData = SphereSolidData(sphereRadius, 40, 40) as Float32Array;
 
     // Create vertex buffers
     const torusNumberOfVertices = torusWireframeData.length / 6;
     const torusVertexBuffer = CreateGPUBuffer(device, torusWireframeData);
-    const sphereNumberOfVertices = sphereWireframeData.length / 6;
-    const sphereVertexBuffer = CreateGPUBuffer(device, sphereWireframeData);
+    const sphereNumberOfVertices = sphereSolidData.length / 5;
+    const sphereVertexBuffer = CreateGPUBuffer(device, sphereSolidData);
 
     const shader = Shaders();
     const pipeline = device.createRenderPipeline({
@@ -74,6 +73,55 @@ const Create3DObject = async (isAnimation = true) => {
         }
     });
 
+    // Load moon texture
+    const moonImage = await fetch('assets/lroc_color_2k.jpg').then(r => r.blob()).then(createImageBitmap);
+    const moonTexture = device.createTexture({
+        size: [moonImage.width, moonImage.height, 1],
+        format: 'rgba8unorm',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    device.queue.copyExternalImageToTexture({ source: moonImage }, { texture: moonTexture }, [moonImage.width, moonImage.height]);
+    const moonSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+
+    // Sphere pipeline — triangle-list with texture
+    const sphereVertexShader = `
+        struct Uniforms { mvpMatrix: mat4x4<f32> };
+        @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+        struct Output {
+            @builtin(position) Position: vec4<f32>,
+            @location(0) vUV: vec2<f32>,
+        };
+        @vertex fn vs_main(@location(0) pos: vec3<f32>, @location(1) uv: vec2<f32>) -> Output {
+            var out: Output;
+            out.Position = uniforms.mvpMatrix * vec4<f32>(pos, 1.0);
+            out.vUV = uv;
+            return out;
+        }`;
+    const sphereFragmentShader = `
+        @group(0) @binding(1) var moonTex: texture_2d<f32>;
+        @group(0) @binding(2) var moonSampler: sampler;
+        @fragment fn fs_main(@location(0) vUV: vec2<f32>) -> @location(0) vec4<f32> {
+            return textureSample(moonTex, moonSampler, vUV);
+        }`;
+    const spherePipeline = device.createRenderPipeline({
+        layout: 'auto',
+        vertex: {
+            module: device.createShaderModule({ code: sphereVertexShader }),
+            entryPoint: 'vs_main',
+            buffers: [{ arrayStride: 20, attributes: [
+                { shaderLocation: 0, format: 'float32x3', offset: 0 },
+                { shaderLocation: 1, format: 'float32x2', offset: 12 },
+            ]}]
+        },
+        fragment: {
+            module: device.createShaderModule({ code: sphereFragmentShader }),
+            entryPoint: 'fs_main',
+            targets: [{ format: gpu.format }]
+        },
+        primitive: { topology: 'triangle-list' },
+        depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' }
+    });
+
     // Create uniform data
     const matrixSize = 4 * 16;
     const uniformOffset = 256;
@@ -108,6 +156,15 @@ const Create3DObject = async (isAnimation = true) => {
     const sphereOmega = vec3.create();
     const sphereQuat  = quat.create();
     const frictionInput = document.getElementById('friction') as HTMLInputElement;
+    const simStepsInput = document.getElementById('sim-steps') as HTMLInputElement;
+    const velMagEl  = document.getElementById('vel-mag')!;
+    const velXEl    = document.getElementById('vel-x')!;
+    const velYEl    = document.getElementById('vel-y')!;
+    const velZEl    = document.getElementById('vel-z')!;
+    const omegaMagEl = document.getElementById('omega-mag')!;
+    const omegaXEl  = document.getElementById('omega-x')!;
+    const omegaYEl  = document.getElementById('omega-y')!;
+    const omegaZEl  = document.getElementById('omega-z')!;
     let lastTime = performance.now();
 
     // Create uniform buffer and layout
@@ -128,16 +185,17 @@ const Create3DObject = async (isAnimation = true) => {
         }]
     });
 
-    const uniformBindGroup2 = device.createBindGroup({
-        layout: pipeline.getBindGroupLayout(0),
-        entries: [{
-            binding: 0,
-            resource: {
-                buffer: uniformBuffer,
-                offset: uniformOffset,
-                size: matrixSize
-            }
-        }]
+    const sphereUniformBuffer = device.createBuffer({
+        size: matrixSize,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    const sphereBindGroup = device.createBindGroup({
+        layout: spherePipeline.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: { buffer: sphereUniformBuffer } },
+            { binding: 1, resource: moonTexture.createView() },
+            { binding: 2, resource: moonSampler },
+        ]
     });
 
     let textureView = gpu.context.getCurrentTexture().createView();
@@ -184,9 +242,13 @@ const Create3DObject = async (isAnimation = true) => {
         const dt = (now - lastTime) / 1000;
         lastTime = now;
 
-        spherePos[0] += sphereVel[0] * dt;
-        spherePos[1] += sphereVel[1] * dt;
-        spherePos[2] += sphereVel[2] * dt;
+        const simSteps = parseInt(simStepsInput.value);
+        const subDt = dt;
+        for (let step = 0; step < simSteps; step++) {
+
+        spherePos[0] += sphereVel[0] * subDt;
+        spherePos[1] += sphereVel[1] * subDt;
+        spherePos[2] += sphereVel[2] * subDt;
 
         // Nearest point on torus central circle (in XZ plane)
         const dxz = Math.sqrt(spherePos[0] ** 2 + spherePos[2] ** 2);
@@ -216,6 +278,13 @@ const Create3DObject = async (isAnimation = true) => {
         if (distTube > maxDist) {
             const inv = 1 / distTube;
             const n = vec3.fromValues(nx * inv, ny * inv, nz * inv);
+
+            // Perturb normal slightly to break billiard limit cycles
+            const roughness = 0.05;
+            const rand = vec3.fromValues(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5);
+            vec3.scaleAndAdd(rand, rand, n, -vec3.dot(rand, n)); // remove component along n
+            vec3.scaleAndAdd(n, n, rand, roughness);
+            vec3.normalize(n, n);
 
             // Push sphere back to surface
             spherePos[0] = cx + n[0] * maxDist;
@@ -257,14 +326,32 @@ const Create3DObject = async (isAnimation = true) => {
             }
         }
 
+        // Clamp angular speed
+        const maxOmega = 4;
+        const omegaSpeed = vec3.length(sphereOmega);
+        if (omegaSpeed > maxOmega) vec3.scale(sphereOmega, sphereOmega, maxOmega / omegaSpeed);
+
         // Integrate angular velocity into orientation quaternion
         const omegaLen = vec3.length(sphereOmega);
         if (omegaLen > 1e-8) {
             const axis = vec3.scale(vec3.create(), sphereOmega, 1 / omegaLen);
-            const dq = quat.setAxisAngle(quat.create(), axis, omegaLen * dt);
+            const dq = quat.setAxisAngle(quat.create(), axis, omegaLen * subDt);
             quat.multiply(sphereQuat, dq, sphereQuat);
             quat.normalize(sphereQuat, sphereQuat);
         }
+
+        } // end sim sub-steps loop
+
+        // Update realtime display
+        const f = (x: number) => x.toFixed(3);
+        velMagEl.textContent  = vec3.length(sphereVel).toFixed(3);
+        velXEl.textContent    = f(sphereVel[0]);
+        velYEl.textContent    = f(sphereVel[1]);
+        velZEl.textContent    = f(sphereVel[2]);
+        omegaMagEl.textContent = vec3.length(sphereOmega).toFixed(3);
+        omegaXEl.textContent  = f(sphereOmega[0]);
+        omegaYEl.textContent  = f(sphereOmega[1]);
+        omegaZEl.textContent  = f(sphereOmega[2]);
 
         // Apply sphere position + orientation in torus local frame, then torus world rotation
         const sphereLocalMatrix = mat4.multiply(mat4.create(),
@@ -283,8 +370,7 @@ const Create3DObject = async (isAnimation = true) => {
         );
 
         device.queue.writeBuffer(
-            uniformBuffer,
-            uniformOffset,
+            sphereUniformBuffer, 0,
             modelViewProjectionMatrix2.buffer,
             modelViewProjectionMatrix2.byteOffset,
             modelViewProjectionMatrix2.byteLength
@@ -303,8 +389,9 @@ const Create3DObject = async (isAnimation = true) => {
         renderPass.draw(torusNumberOfVertices);
 
         // Draw sphere
+        renderPass.setPipeline(spherePipeline);
         renderPass.setVertexBuffer(0, sphereVertexBuffer);
-        renderPass.setBindGroup(0, uniformBindGroup2);
+        renderPass.setBindGroup(0, sphereBindGroup);
         renderPass.draw(sphereNumberOfVertices);
 
         renderPass.end();
@@ -357,4 +444,10 @@ const frictionInput = document.getElementById('friction') as HTMLInputElement;
 const frictionVal   = document.getElementById('friction-val') as HTMLSpanElement;
 frictionInput.addEventListener('input', () => {
     frictionVal.textContent = frictionInput.value;
+});
+
+const simStepsInputGlobal = document.getElementById('sim-steps') as HTMLInputElement;
+const simStepsVal          = document.getElementById('sim-steps-val') as HTMLSpanElement;
+simStepsInputGlobal.addEventListener('input', () => {
+    simStepsVal.textContent = simStepsInputGlobal.value;
 });
