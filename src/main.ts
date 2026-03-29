@@ -1,28 +1,52 @@
 import { InitGPU, CreateGPUBuffer, CreateGPUBufferUint, CreateTransforms, CreateViewProjection, CreateAnimation } from './helper';
 import { Shaders } from './shaders';
 import { vec3, mat4, quat } from 'gl-matrix';
-import { TorusWireframeData, SphereSolidData } from './vertex_data';
+import { TorusTubeData, SphereSolidData } from './vertex_data';
 import "./site.css";
 
+// --- DOM elements (queried once) ---
+const majorRadiusInput  = document.getElementById('major-radius') as HTMLInputElement;
+const majorRadiusVal    = document.getElementById('major-radius-val') as HTMLSpanElement;
+const tubeRadiusInput   = document.getElementById('tube-radius') as HTMLInputElement;
+const tubeRadiusVal     = document.getElementById('tube-radius-val') as HTMLSpanElement;
+const sphereRadiusInput = document.getElementById('sphere-radius') as HTMLInputElement;
+const sphereRadiusVal   = document.getElementById('sphere-radius-val') as HTMLSpanElement;
+const tumbleSpeedInput  = document.getElementById('tumble-speed') as HTMLInputElement;
+const tumbleSpeedVal    = document.getElementById('tumble-speed-val') as HTMLSpanElement;
+const frictionInput     = document.getElementById('friction') as HTMLInputElement;
+const frictionVal       = document.getElementById('friction-val') as HTMLSpanElement;
+const simStepsInput     = document.getElementById('sim-steps') as HTMLInputElement;
+const simStepsVal       = document.getElementById('sim-steps-val') as HTMLSpanElement;
+const velMagEl   = document.getElementById('vel-mag')!;
+const velXEl     = document.getElementById('vel-x')!;
+const velYEl     = document.getElementById('vel-y')!;
+const velZEl     = document.getElementById('vel-z')!;
+const omegaMagEl = document.getElementById('omega-mag')!;
+const omegaXEl   = document.getElementById('omega-x')!;
+const omegaYEl   = document.getElementById('omega-y')!;
+const omegaZEl   = document.getElementById('omega-z')!;
+
+// --- GPU resource tracking ---
+let prevResources: { destroy(): void }[] = [];
+
 const Create3DObject = async (isAnimation = true) => {
+    // Destroy previous GPU resources
+    for (const res of prevResources) res.destroy();
+    prevResources = [];
+
     const gpu = await InitGPU();
     const device = gpu.device;
 
-    const majorRadiusInput = document.getElementById('major-radius') as HTMLInputElement;
-    const tubeRadiusInput  = document.getElementById('tube-radius')  as HTMLInputElement;
     let R = parseFloat(majorRadiusInput.value);
     let r = parseFloat(tubeRadiusInput.value);
-    let N = 20, n = 20;
-    let torusColor: vec3 = vec3.fromValues(1, 0, 0);
-    let torusCenter: vec3 = [0, 0, 0];
-    const sphereRadiusInput = document.getElementById('sphere-radius') as HTMLInputElement;
+    let N = 20, n = 10;
     let sphereRadius = parseFloat(sphereRadiusInput.value);
-    const torusWireframeData = TorusWireframeData(R, r, N, n, torusCenter, torusColor) as Float32Array;
+    const torusTubeData = TorusTubeData(R, r, N, n);
     const sphereSolidData = SphereSolidData(sphereRadius, 40, 40) as Float32Array;
 
     // Create vertex buffers
-    const torusNumberOfVertices = torusWireframeData.length / 6;
-    const torusVertexBuffer = CreateGPUBuffer(device, torusWireframeData);
+    const torusNumberOfVertices = torusTubeData.length / 6;
+    const torusVertexBuffer = CreateGPUBuffer(device, torusTubeData);
     const sphereNumberOfVertices = sphereSolidData.length / 5;
     const sphereVertexBuffer = CreateGPUBuffer(device, sphereSolidData);
 
@@ -64,7 +88,7 @@ const Create3DObject = async (isAnimation = true) => {
             ]
         },
         primitive: {
-            topology: "line-list",
+            topology: "triangle-list",
         },
         depthStencil: {
             format: "depth24plus",
@@ -118,7 +142,7 @@ const Create3DObject = async (isAnimation = true) => {
             entryPoint: 'fs_main',
             targets: [{ format: gpu.format }]
         },
-        primitive: { topology: 'triangle-list' },
+        primitive: { topology: 'triangle-list', cullMode: 'back' },
         depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' }
     });
 
@@ -155,16 +179,11 @@ const Create3DObject = async (isAnimation = true) => {
     vec3.scale(sphereVel, sphereVel, sphereSpeed);
     const sphereOmega = vec3.create();
     const sphereQuat  = quat.create();
-    const frictionInput = document.getElementById('friction') as HTMLInputElement;
-    const simStepsInput = document.getElementById('sim-steps') as HTMLInputElement;
-    const velMagEl  = document.getElementById('vel-mag')!;
-    const velXEl    = document.getElementById('vel-x')!;
-    const velYEl    = document.getElementById('vel-y')!;
-    const velZEl    = document.getElementById('vel-z')!;
-    const omegaMagEl = document.getElementById('omega-mag')!;
-    const omegaXEl  = document.getElementById('omega-x')!;
-    const omegaYEl  = document.getElementById('omega-y')!;
-    const omegaZEl  = document.getElementById('omega-z')!;
+
+    // Track initial orbital direction so the propelling force never reverses it
+    const dxz0 = Math.sqrt(spherePos[0] ** 2 + spherePos[2] ** 2);
+    const t0 = vec3.fromValues(-spherePos[2] / dxz0, 0, spherePos[0] / dxz0);
+    const orbitalDir = Math.sign(vec3.dot(sphereVel, t0)) || 1;
     let lastTime = performance.now();
 
     // Create uniform buffer and layout
@@ -180,7 +199,7 @@ const Create3DObject = async (isAnimation = true) => {
             resource: {
                 buffer: uniformBuffer,
                 offset: 0,
-                size: matrixSize
+                size: matrixSize * 2   // mvpMatrix + modelMatrix
             }
         }]
     });
@@ -218,6 +237,9 @@ const Create3DObject = async (isAnimation = true) => {
             depthStoreOp: "store",
         }
     };
+
+    // Track GPU resources for cleanup on reinit
+    prevResources = [torusVertexBuffer, sphereVertexBuffer, uniformBuffer, sphereUniformBuffer, depthTexture, moonTexture];
 
     function draw() {
 
@@ -279,13 +301,6 @@ const Create3DObject = async (isAnimation = true) => {
             const inv = 1 / distTube;
             const n = vec3.fromValues(nx * inv, ny * inv, nz * inv);
 
-            // Perturb normal slightly to break billiard limit cycles
-            const roughness = 0.05;
-            const rand = vec3.fromValues(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5);
-            vec3.scaleAndAdd(rand, rand, n, -vec3.dot(rand, n)); // remove component along n
-            vec3.scaleAndAdd(n, n, rand, roughness);
-            vec3.normalize(n, n);
-
             // Push sphere back to surface
             spherePos[0] = cx + n[0] * maxDist;
             spherePos[1] = n[1] * maxDist;
@@ -326,8 +341,19 @@ const Create3DObject = async (isAnimation = true) => {
             }
         }
 
+        // Orbital floor: ensure sphere keeps moving around the torus in its original direction
+        const v_min_orbital = 0.3;
+        const dxzNow = Math.sqrt(spherePos[0] ** 2 + spherePos[2] ** 2);
+        if (dxzNow > 0) {
+            const t_orb = vec3.fromValues(-spherePos[2] / dxzNow, 0, spherePos[0] / dxzNow);
+            const v_orb = vec3.dot(sphereVel, t_orb) * orbitalDir;
+            if (v_orb < v_min_orbital) {
+                vec3.scaleAndAdd(sphereVel, sphereVel, t_orb, orbitalDir * (v_min_orbital - v_orb));
+            }
+        }
+
         // Clamp angular speed
-        const maxOmega = 4;
+        const maxOmega = 6;
         const omegaSpeed = vec3.length(sphereOmega);
         if (omegaSpeed > maxOmega) vec3.scale(sphereOmega, sphereOmega, maxOmega / omegaSpeed);
 
@@ -368,6 +394,7 @@ const Create3DObject = async (isAnimation = true) => {
             modelViewProjectionMatrix1.byteOffset,
             modelViewProjectionMatrix1.byteLength
         );
+        device.queue.writeBuffer(uniformBuffer, matrixSize, (modelMatrix1 as any).buffer as ArrayBuffer, (modelMatrix1 as any).byteOffset, (modelMatrix1 as any).byteLength);
 
         device.queue.writeBuffer(
             sphereUniformBuffer, 0,
@@ -399,23 +426,18 @@ const Create3DObject = async (isAnimation = true) => {
         device.queue.submit([commandEncoder.finish()]);
     }
 
-    const tumbleSpeedInput = document.getElementById('tumble-speed') as HTMLInputElement;
     CreateAnimation(draw, rotation, isAnimation, () => parseFloat(tumbleSpeedInput.value));
 }
 
 Create3DObject(true);
 
-window.addEventListener('resize', () => Create3DObject(false));
+window.addEventListener('resize', () => Create3DObject(true));
 
-const majorRadiusInput = document.getElementById('major-radius') as HTMLInputElement;
-const majorRadiusVal   = document.getElementById('major-radius-val') as HTMLSpanElement;
 majorRadiusInput.addEventListener('input', () => {
     majorRadiusVal.textContent = majorRadiusInput.value;
     Create3DObject(true);
 });
 
-const tubeRadiusInput = document.getElementById('tube-radius') as HTMLInputElement;
-const tubeRadiusVal   = document.getElementById('tube-radius-val') as HTMLSpanElement;
 tubeRadiusInput.addEventListener('input', () => {
     tubeRadiusVal.textContent = tubeRadiusInput.value;
     const r = parseFloat(tubeRadiusInput.value);
@@ -427,27 +449,19 @@ tubeRadiusInput.addEventListener('input', () => {
     Create3DObject(true);
 });
 
-const sphereRadiusInput = document.getElementById('sphere-radius') as HTMLInputElement;
-const sphereRadiusVal   = document.getElementById('sphere-radius-val') as HTMLSpanElement;
 sphereRadiusInput.addEventListener('input', () => {
     sphereRadiusVal.textContent = sphereRadiusInput.value;
     Create3DObject(true);
 });
 
-const tumbleSpeedInput = document.getElementById('tumble-speed') as HTMLInputElement;
-const tumbleSpeedVal   = document.getElementById('tumble-speed-val') as HTMLSpanElement;
 tumbleSpeedInput.addEventListener('input', () => {
     tumbleSpeedVal.textContent = tumbleSpeedInput.value;
 });
 
-const frictionInput = document.getElementById('friction') as HTMLInputElement;
-const frictionVal   = document.getElementById('friction-val') as HTMLSpanElement;
 frictionInput.addEventListener('input', () => {
     frictionVal.textContent = frictionInput.value;
 });
 
-const simStepsInputGlobal = document.getElementById('sim-steps') as HTMLInputElement;
-const simStepsVal          = document.getElementById('sim-steps-val') as HTMLSpanElement;
-simStepsInputGlobal.addEventListener('input', () => {
-    simStepsVal.textContent = simStepsInputGlobal.value;
+simStepsInput.addEventListener('input', () => {
+    simStepsVal.textContent = simStepsInput.value;
 });

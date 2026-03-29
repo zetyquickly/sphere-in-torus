@@ -1,6 +1,12 @@
-import { vec2, vec3, mat4 } from 'gl-matrix';
+import { vec3, mat4 } from 'gl-matrix';
+
+let currentAnimationId: number | null = null;
 
 export const CreateAnimation = (draw:any, rotation:vec3 = vec3.fromValues(0,0,0), isAnimation = true, getSpeed: () => number = () => 0.01) => {
+    if (currentAnimationId !== null) {
+        cancelAnimationFrame(currentAnimationId);
+        currentAnimationId = null;
+    }
     function step() {
         if(isAnimation){
             const speed = getSpeed();
@@ -11,9 +17,9 @@ export const CreateAnimation = (draw:any, rotation:vec3 = vec3.fromValues(0,0,0)
             rotation = [0, 0, 0];
         }
         draw();
-        requestAnimationFrame(step);
+        currentAnimationId = requestAnimationFrame(step);
     }
-    requestAnimationFrame(step);
+    currentAnimationId = requestAnimationFrame(step);
 }
 
 export const CreateTransforms = (modelMat:mat4, translation:vec3 = [0,0,0], rotation:vec3 = [0,0,0], scaling:vec3 = [1,1,1]) => {
@@ -88,7 +94,11 @@ export const CreateGPUBuffer = (device:GPUDevice, data:Float32Array,
     return buffer;
 };
 
+let cachedGPU: { device: GPUDevice; canvas: HTMLCanvasElement; format: GPUTextureFormat; context: GPUCanvasContext } | null = null;
+
 export const InitGPU = async () => {
+    if (cachedGPU) return cachedGPU;
+
     const checkgpu = CheckWebGPU();
     if(checkgpu.includes('Your current browser does not support WebGPU!')){
         console.log(checkgpu);
@@ -98,20 +108,14 @@ export const InitGPU = async () => {
     const adapter = await navigator.gpu?.requestAdapter();
     const device = await adapter?.requestDevice() as GPUDevice;
     const context = canvas.getContext('webgpu') as GPUCanvasContext;
- /*const devicePixelRatio = window.devicePixelRatio || 1;
-    const size = [
-        canvas.clientWidth * devicePixelRatio,
-        canvas.clientHeight * devicePixelRatio,
-    ];*/
-    //const format = context.getPreferredFormat(adapter!);
     const format = navigator.gpu.getPreferredCanvasFormat();
     context.configure({
         device: device,
         format: format,
-        //size: size
         alphaMode:'opaque'
     });
-    return{ device, canvas, format, context };
+    cachedGPU = { device, canvas, format, context };
+    return cachedGPU;
 };
 
 /*export const InitGPU = async () => {
