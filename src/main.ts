@@ -107,8 +107,7 @@ const Create3DObject = async (isAnimation = true) => {
     vec3.scale(sphereVel, sphereVel, sphereSpeed);
     const sphereOmega = vec3.create();
     const sphereQuat  = quat.create();
-    const restitutionInput = document.getElementById('restitution') as HTMLInputElement;
-    const frictionInput    = document.getElementById('friction')    as HTMLInputElement;
+    const frictionInput = document.getElementById('friction') as HTMLInputElement;
     let lastTime = performance.now();
 
     // Create uniform buffer and layout
@@ -234,7 +233,7 @@ const Create3DObject = async (isAnimation = true) => {
             const v_n = vec3.dot(v_contact, n);
 
             if (v_n > 0) {
-                const e  = parseFloat(restitutionInput.value);
+                const e  = 1;
                 const mu = parseFloat(frictionInput.value);
 
                 // Normal impulse (unit mass, r_c ∥ n so no angular contribution)
@@ -248,12 +247,9 @@ const Create3DObject = async (isAnimation = true) => {
                 if (v_t_len > 1e-6) {
                     const t_hat = vec3.scale(vec3.create(), v_t, -1 / v_t_len);
 
-                    // Solid sphere, unit mass: effective tangential impulse = 2/7 |v_t|
+                    // Friction impulse applied to ω only — v is unchanged
+                    // preserves along-orbit velocity which is always ⊥ to n
                     const J_t = Math.min(v_t_len * 2 / 7, mu * Math.abs(J_n));
-
-                    vec3.scaleAndAdd(sphereVel, sphereVel, t_hat, J_t);
-
-                    // Δω = (r_c × t_hat) * J_t / I,  I = 2/5 * sphereRadius²
                     const I = 2 / 5 * sphereRadius * sphereRadius;
                     vec3.scaleAndAdd(sphereOmega, sphereOmega,
                         vec3.cross(vec3.create(), r_c, t_hat), J_t / I);
@@ -355,12 +351,6 @@ const tumbleSpeedInput = document.getElementById('tumble-speed') as HTMLInputEle
 const tumbleSpeedVal   = document.getElementById('tumble-speed-val') as HTMLSpanElement;
 tumbleSpeedInput.addEventListener('input', () => {
     tumbleSpeedVal.textContent = tumbleSpeedInput.value;
-});
-
-const restitutionInput = document.getElementById('restitution') as HTMLInputElement;
-const restitutionVal   = document.getElementById('restitution-val') as HTMLSpanElement;
-restitutionInput.addEventListener('input', () => {
-    restitutionVal.textContent = restitutionInput.value;
 });
 
 const frictionInput = document.getElementById('friction') as HTMLInputElement;
