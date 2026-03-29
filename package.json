@@ -1,0 +1,35 @@
+{
+  "name": "webgpu01",
+  "version": "1.0.0",
+  "description": "This is the source code for the 16th part of a series YouTube videos on step-by-step WebGPU graphics programming.",
+  "main": "index.js",
+  "scripts": {
+    "tsc": "tsc",
+    "tscw": "tsc --watch",
+    "dev": "webpack --mode development",
+    "prod": "NODE_OPTIONS=--openssl-legacy-provider webpack --mode production",
+    "watch": "webpack --watch --mode production",
+    "deploy": "push-dir --dir=dist --branch=gh-pages --allow-unclean"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/jquery": "^3.5.5",
+    "@types/node": "14.14.20",
+    "@webgpu/types": "^0.1.21",
+    "3d-view-controls": "^2.2.2",
+    "css-loader": "^5.2.0",
+    "gl-matrix": "^3.3.0",
+    "jquery": "^3.6.0",
+    "jshint": "^2.12.0",
+    "path": "^0.12.7",
+    "push-dir": "^0.4.1",
+    "style-loader": "^3.3.1",
+    "ts-loader": "^8.1.0",
+    "ts-shader-loader": "^1.0.6",
+    "typescript": "^4.2.3",
+    "webpack": "^5.18.0",
+    "webpack-cli": "^4.6.0"
+  }
+}
