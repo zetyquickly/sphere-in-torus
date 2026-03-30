@@ -40,7 +40,7 @@ export const Shaders = () => {
             let envVignette = 1.0 - smoothstep(0.4, 1.0, length(envCenter) * 1.2);
             envColor *= envVignette;
 
-            // Gold key light from top-right, purple fill from opposite side
+            // Gold key light from top-right, crimson fill from opposite side
             let L1 = normalize(vec3<f32>(3.0, 4.0, 5.0));
             let L2 = normalize(vec3<f32>(-2.0, 0.5, -2.0));
 
@@ -55,15 +55,15 @@ export const Shaders = () => {
             let F0 = vec3<f32>(0.9, 0.7, 0.3);
             let fresnel = F0 + (1.0 - F0) * pow(1.0 - max(dot(N, V), 0.0), 5.0);
 
-            let gold   = vec3<f32>(1.0, 0.78, 0.18);
-            let purple = vec3<f32>(0.85, 0.016, 0.365);
+            let gold    = vec3<f32>(1.0, 0.78, 0.18);
+            let crimson = vec3<f32>(0.85, 0.016, 0.365);
 
-            var color = vec3<f32>(0.04, 0.02, 0.06);           // near-black ambient
-            color += diff1 * 0.12 * mix(gold, purple, 0.4);    // subtle diffuse
-            color += spec1 * gold;                              // gold specular
-            color += spec2 * 0.7 * purple;                     // purple specular
-            color += fresnel * envColor * 0.6;                  // environment reflection
-            color += fresnel * 0.15 * mix(gold, purple, 0.5);  // tinted edge glow
+            var color = vec3<f32>(0.04, 0.02, 0.06);               // near-black ambient
+            color += diff1 * 0.12 * mix(gold, crimson, 0.4);       // subtle diffuse
+            color += spec1 * gold;                                   // gold specular
+            color += spec2 * 0.7 * crimson;                         // crimson specular
+            color += fresnel * envColor * 0.6;                      // environment reflection
+            color += fresnel * 0.15 * mix(gold, crimson, 0.5);     // tinted edge glow
 
             return vec4<f32>(color, 1.0);
         }`;
