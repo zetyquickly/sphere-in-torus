@@ -43,7 +43,7 @@ export const CreateTransforms = (modelMat:mat4, translation:vec3 = [0,0,0], rota
     mat4.multiply(modelMat, translateMat, modelMat);
 };
 
-export const CreateViewProjection = (respectRatio = 1.0, cameraPosition:vec3 = [2, 2, 4], lookDirection:vec3 = [0, 0, 0], 
+export const CreateViewProjection = (respectRatio = 1.0, cameraPosition:vec3 = [2, 2, 4], lookDirection:vec3 = [0, -0.5, 0], 
     upDirection:vec3 = [0, 1, 0]) => {
 
     const viewMatrix = mat4.create();

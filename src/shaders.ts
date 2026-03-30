@@ -42,7 +42,7 @@ export const Shaders = () => {
             let fresnel = pow(1.0 - max(dot(N, V), 0.0), 4.0);
 
             let gold   = vec3<f32>(1.0, 0.78, 0.18);
-            let purple = vec3<f32>(0.52, 0.08, 0.92);
+            let purple = vec3<f32>(0.85, 0.016, 0.365);
 
             var color = vec3<f32>(0.04, 0.02, 0.06);           // near-black ambient
             color += diff1 * 0.12 * mix(gold, purple, 0.4);    // subtle diffuse

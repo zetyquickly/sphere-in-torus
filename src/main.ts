@@ -43,16 +43,20 @@ const Create3DObject = async (isAnimation = true) => {
     let R = parseFloat(majorRadiusInput.value);
     let r = parseFloat(tubeRadiusInput.value);
     let N = 20, n = 10;
-    let sphereRadius = parseFloat(sphereRadiusInput.value);
+    const sphere2Radius = parseFloat(sphereRadiusInput.value);
+    let sphereRadius = sphere2Radius * 0.33;
     const sampleCount = msaaToggle.checked ? 4 : 1;
     const torusTubeData = TorusTubeData(R, r, N, n, 0.025, 12);
     const sphereSolidData = SphereSolidData(sphereRadius, 40, 40) as Float32Array;
+    const sphere2SolidData = SphereSolidData(sphere2Radius, 40, 40) as Float32Array;
 
     // Create vertex buffers
     const torusNumberOfVertices = torusTubeData.length / 6;
     const torusVertexBuffer = CreateGPUBuffer(device, torusTubeData);
     const sphereNumberOfVertices = sphereSolidData.length / 5;
     const sphereVertexBuffer = CreateGPUBuffer(device, sphereSolidData);
+    const sphere2NumberOfVertices = sphere2SolidData.length / 5;
+    const sphere2VertexBuffer = CreateGPUBuffer(device, sphere2SolidData);
 
     const shader = Shaders();
     const pipeline = device.createRenderPipeline({
@@ -104,15 +108,24 @@ const Create3DObject = async (isAnimation = true) => {
         }
     });
 
-    // Load moon texture
-    const moonImage = await fetch('assets/lroc_color_2k.jpg').then(r => r.blob()).then(createImageBitmap);
+    // Load textures
+    const [moonImage, earthImage] = await Promise.all([
+        fetch('assets/lroc_color_2k.jpg').then(r => r.blob()).then(createImageBitmap),
+        fetch('assets/2k_earth_daymap.jpg').then(r => r.blob()).then(createImageBitmap),
+    ]);
     const moonTexture = device.createTexture({
         size: [moonImage.width, moonImage.height, 1],
         format: 'rgba8unorm',
         usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
     });
     device.queue.copyExternalImageToTexture({ source: moonImage }, { texture: moonTexture }, [moonImage.width, moonImage.height]);
-    const moonSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+    const earthTexture = device.createTexture({
+        size: [earthImage.width, earthImage.height, 1],
+        format: 'rgba8unorm',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    device.queue.copyExternalImageToTexture({ source: earthImage }, { texture: earthTexture }, [earthImage.width, earthImage.height]);
+    const texSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
 
     // Sphere pipeline — triangle-list with texture
     const sphereVertexShader = `
@@ -130,9 +143,9 @@ const Create3DObject = async (isAnimation = true) => {
         }`;
     const sphereFragmentShader = `
         @group(0) @binding(1) var moonTex: texture_2d<f32>;
-        @group(0) @binding(2) var moonSampler: sampler;
+        @group(0) @binding(2) var texSampler: sampler;
         @fragment fn fs_main(@location(0) vUV: vec2<f32>) -> @location(0) vec4<f32> {
-            return textureSample(moonTex, moonSampler, vUV);
+            return textureSample(moonTex, texSampler, vUV);
         }`;
     const spherePipeline = device.createRenderPipeline({
         layout: 'auto',
@@ -167,24 +180,25 @@ const Create3DObject = async (isAnimation = true) => {
     const modelViewProjectionMatrix1 = mat4.create() as Float32Array;
 
     const modelMatrix2 = mat4.create();
-    const translateMatrix2 = mat4.create();
     const modelViewProjectionMatrix2 = mat4.create() as Float32Array;
+    const modelMatrix3 = mat4.create();
+    const modelViewProjectionMatrix3 = mat4.create() as Float32Array;
 
-    // Physics state — sphere lives in torus local frame
-    const sphereSpeed = 1.5;
-    const spherePos = vec3.fromValues(R, 0, 0);
-
-    // Initial velocity: random unit vector within 30° cone around orbit tangent (0, 0, -1) at start position
+    // Shared initial direction for both spheres
     const halfAngle = Math.PI / 6;
     const phi = Math.random() * 2 * Math.PI;
     const cosTheta = Math.cos(halfAngle) + Math.random() * (1 - Math.cos(halfAngle));
     const sinTheta = Math.sqrt(1 - cosTheta * cosTheta);
-    const sphereVel = vec3.fromValues(
+    const initDir = vec3.fromValues(
         sinTheta * Math.cos(phi),
         sinTheta * Math.sin(phi),
         -cosTheta
     );
-    vec3.scale(sphereVel, sphereVel, sphereSpeed);
+
+    // Physics state — sphere 1 (moon) lives in torus local frame
+    const sphereSpeed = 1.5;
+    const spherePos = vec3.fromValues(R, 0, 0);
+    const sphereVel = vec3.scale(vec3.create(), initDir, sphereSpeed);
     const sphereOmega = vec3.create();
     const sphereQuat  = quat.create();
 
@@ -192,6 +206,17 @@ const Create3DObject = async (isAnimation = true) => {
     const dxz0 = Math.sqrt(spherePos[0] ** 2 + spherePos[2] ** 2);
     const t0 = vec3.fromValues(-spherePos[2] / dxz0, 0, spherePos[0] / dxz0);
     const orbitalDir = Math.sign(vec3.dot(sphereVel, t0)) || 1;
+
+    // Physics state — sphere 2 (earth), starts after 2s delay
+    const sphere2Pos = vec3.fromValues(R, 0, 0);
+    const sphere2Vel = vec3.scale(vec3.create(), initDir, sphereSpeed);
+    const sphere2Omega = vec3.create();
+    const sphere2Quat  = quat.create();
+    const sphere2OrbitalDir = orbitalDir;
+    const sphere2Delay = 2.0; // seconds
+    const startTime = performance.now();
+    let sphere2Active = false;
+
     let lastTime = performance.now();
 
     // Create uniform buffer and layout
@@ -221,7 +246,20 @@ const Create3DObject = async (isAnimation = true) => {
         entries: [
             { binding: 0, resource: { buffer: sphereUniformBuffer } },
             { binding: 1, resource: moonTexture.createView() },
-            { binding: 2, resource: moonSampler },
+            { binding: 2, resource: texSampler },
+        ]
+    });
+
+    const sphere2UniformBuffer = device.createBuffer({
+        size: matrixSize,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    const sphere2BindGroup = device.createBindGroup({
+        layout: spherePipeline.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: { buffer: sphere2UniformBuffer } },
+            { binding: 1, resource: earthTexture.createView() },
+            { binding: 2, resource: texSampler },
         ]
     });
 
@@ -254,7 +292,7 @@ const Create3DObject = async (isAnimation = true) => {
     };
 
     // Track GPU resources for cleanup on reinit
-    prevResources = [torusVertexBuffer, sphereVertexBuffer, uniformBuffer, sphereUniformBuffer, depthTexture, moonTexture];
+    prevResources = [torusVertexBuffer, sphereVertexBuffer, sphere2VertexBuffer, uniformBuffer, sphereUniformBuffer, sphere2UniformBuffer, depthTexture, moonTexture, earthTexture];
     if (msaaTexture) prevResources.push(msaaTexture);
 
     function draw() {
@@ -382,7 +420,86 @@ const Create3DObject = async (isAnimation = true) => {
             quat.normalize(sphereQuat, sphereQuat);
         }
 
-        } // end sim sub-steps loop
+        } // end sphere1 sim sub-steps loop
+
+        // Activate sphere2 after delay
+        if (!sphere2Active && (now - startTime) / 1000 >= sphere2Delay) {
+            sphere2Active = true;
+        }
+
+        // Sphere 2 physics (identical logic, different radius)
+        if (sphere2Active) {
+        for (let step = 0; step < simSteps; step++) {
+
+        sphere2Pos[0] += sphere2Vel[0] * subDt;
+        sphere2Pos[1] += sphere2Vel[1] * subDt;
+        sphere2Pos[2] += sphere2Vel[2] * subDt;
+
+        const dxz2 = Math.sqrt(sphere2Pos[0] ** 2 + sphere2Pos[2] ** 2);
+        const cx2 = dxz2 > 0 ? R * sphere2Pos[0] / dxz2 : R;
+        const cz2 = dxz2 > 0 ? R * sphere2Pos[2] / dxz2 : 0;
+
+        const nx2 = sphere2Pos[0] - cx2;
+        const ny2 = sphere2Pos[1];
+        const nz2 = sphere2Pos[2] - cz2;
+        const distTube2 = Math.sqrt(nx2 * nx2 + ny2 * ny2 + nz2 * nz2);
+
+        const maxDist2 = r - sphere2Radius;
+        if (distTube2 > maxDist2) {
+            const inv2 = 1 / distTube2;
+            const n2 = vec3.fromValues(nx2 * inv2, ny2 * inv2, nz2 * inv2);
+
+            sphere2Pos[0] = cx2 + n2[0] * maxDist2;
+            sphere2Pos[1] = n2[1] * maxDist2;
+            sphere2Pos[2] = cz2 + n2[2] * maxDist2;
+
+            const r_c2 = vec3.scale(vec3.create(), n2, sphere2Radius);
+            const v_contact2 = vec3.add(vec3.create(), sphere2Vel,
+                vec3.cross(vec3.create(), sphere2Omega, r_c2));
+            const v_n2 = vec3.dot(v_contact2, n2);
+
+            if (v_n2 > 0) {
+                const e2 = 1;
+                const mu2 = parseFloat(frictionInput.value);
+                const J_n2 = -(1 + e2) * v_n2;
+                vec3.scaleAndAdd(sphere2Vel, sphere2Vel, n2, J_n2);
+
+                const v_t2 = vec3.scaleAndAdd(vec3.create(), v_contact2, n2, -v_n2);
+                const v_t_len2 = vec3.length(v_t2);
+                if (v_t_len2 > 1e-6) {
+                    const t_hat2 = vec3.scale(vec3.create(), v_t2, -1 / v_t_len2);
+                    const J_t2 = Math.min(v_t_len2 * 2 / 7, mu2 * Math.abs(J_n2));
+                    const I2 = 2 / 5 * sphere2Radius * sphere2Radius;
+                    vec3.scaleAndAdd(sphere2Omega, sphere2Omega,
+                        vec3.cross(vec3.create(), r_c2, t_hat2), J_t2 / I2);
+                }
+            }
+        }
+
+        // Orbital floor for sphere2
+        const dxzNow2 = Math.sqrt(sphere2Pos[0] ** 2 + sphere2Pos[2] ** 2);
+        if (dxzNow2 > 0) {
+            const t_orb2 = vec3.fromValues(-sphere2Pos[2] / dxzNow2, 0, sphere2Pos[0] / dxzNow2);
+            const v_orb2 = vec3.dot(sphere2Vel, t_orb2) * sphere2OrbitalDir;
+            if (v_orb2 < 0.3) {
+                vec3.scaleAndAdd(sphere2Vel, sphere2Vel, t_orb2, sphere2OrbitalDir * (0.3 - v_orb2));
+            }
+        }
+
+        const maxOmega2 = 6;
+        const omegaSpeed2 = vec3.length(sphere2Omega);
+        if (omegaSpeed2 > maxOmega2) vec3.scale(sphere2Omega, sphere2Omega, maxOmega2 / omegaSpeed2);
+
+        const omegaLen2 = vec3.length(sphere2Omega);
+        if (omegaLen2 > 1e-8) {
+            const axis2 = vec3.scale(vec3.create(), sphere2Omega, 1 / omegaLen2);
+            const dq2 = quat.setAxisAngle(quat.create(), axis2, omegaLen2 * subDt);
+            quat.multiply(sphere2Quat, dq2, sphere2Quat);
+            quat.normalize(sphere2Quat, sphere2Quat);
+        }
+
+        } // end sphere2 sim sub-steps loop
+        } // end sphere2Active check
 
         // Update realtime display
         const f = (x: number) => x.toFixed(3);
@@ -419,6 +536,23 @@ const Create3DObject = async (isAnimation = true) => {
             modelViewProjectionMatrix2.byteLength
         );
 
+        // Sphere 2 transform
+        if (sphere2Active) {
+            const sphere2LocalMatrix = mat4.multiply(mat4.create(),
+                mat4.fromTranslation(mat4.create(), sphere2Pos),
+                mat4.fromQuat(mat4.create(), sphere2Quat));
+            mat4.multiply(modelMatrix3, torusRotationMatrix, sphere2LocalMatrix);
+            mat4.multiply(modelViewProjectionMatrix3, vp.viewMatrix, modelMatrix3);
+            mat4.multiply(modelViewProjectionMatrix3, vp.projectionMatrix, modelViewProjectionMatrix3);
+
+            device.queue.writeBuffer(
+                sphere2UniformBuffer, 0,
+                modelViewProjectionMatrix3.buffer,
+                modelViewProjectionMatrix3.byteOffset,
+                modelViewProjectionMatrix3.byteLength
+            );
+        }
+
         const swapView = gpu.context.getCurrentTexture().createView();
         if (msaaTexture) {
             renderPassDescription.colorAttachments[0].resolveTarget = swapView;
@@ -435,11 +569,18 @@ const Create3DObject = async (isAnimation = true) => {
         renderPass.setBindGroup(0, uniformBindGroup1);
         renderPass.draw(torusNumberOfVertices);
 
-        // Draw sphere
+        // Draw sphere 1 (moon)
         renderPass.setPipeline(spherePipeline);
         renderPass.setVertexBuffer(0, sphereVertexBuffer);
         renderPass.setBindGroup(0, sphereBindGroup);
         renderPass.draw(sphereNumberOfVertices);
+
+        // Draw sphere 2 (earth)
+        if (sphere2Active) {
+            renderPass.setVertexBuffer(0, sphere2VertexBuffer);
+            renderPass.setBindGroup(0, sphere2BindGroup);
+            renderPass.draw(sphere2NumberOfVertices);
+        }
 
         renderPass.end();
 
