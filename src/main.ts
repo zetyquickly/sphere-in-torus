@@ -468,7 +468,7 @@ const Create3DObject = async (isAnimation = true) => {
 
         const simSteps = parseInt(simStepsInput.value);
         const subDt = dt;
-        const v_min_orbital = 0.3;
+        const v_min_orbital = 0.8;
         for (let step = 0; step < simSteps; step++) {
 
         spherePos[0] += sphereVel[0] * subDt;
