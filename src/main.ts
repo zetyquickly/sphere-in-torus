@@ -109,9 +109,10 @@ const Create3DObject = async (isAnimation = true) => {
     });
 
     // Load textures
-    const [moonImage, earthImage] = await Promise.all([
+    const [moonImage, earthImage, skyboxImage] = await Promise.all([
         fetch('assets/lroc_color_2k.jpg').then(r => r.blob()).then(createImageBitmap),
         fetch('assets/2k_earth_daymap.jpg').then(r => r.blob()).then(createImageBitmap),
+        fetch('assets/skybox3.jpg').then(r => r.blob()).then(createImageBitmap),
     ]);
     const moonTexture = device.createTexture({
         size: [moonImage.width, moonImage.height, 1],
@@ -127,6 +128,65 @@ const Create3DObject = async (isAnimation = true) => {
     device.queue.copyExternalImageToTexture({ source: earthImage }, { texture: earthTexture }, [earthImage.width, earthImage.height]);
     const texSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
 
+    // Skybox
+    const skyboxTexture = device.createTexture({
+        size: [skyboxImage.width, skyboxImage.height, 1],
+        format: 'rgba8unorm',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    device.queue.copyExternalImageToTexture({ source: skyboxImage }, { texture: skyboxTexture }, [skyboxImage.width, skyboxImage.height]);
+
+    const imageAspect = skyboxImage.width / skyboxImage.height;
+    const canvasAspect = gpu.canvas.width / gpu.canvas.height;
+    const uvScale: [number, number] = canvasAspect > imageAspect
+        ? [1.0, imageAspect / canvasAspect]
+        : [canvasAspect / imageAspect, 1.0];
+
+    const skyboxVertexShader = `
+        struct SkyUniforms { uvScale: vec2<f32> };
+        @group(0) @binding(2) var<uniform> sky: SkyUniforms;
+        struct Output {
+            @builtin(position) Position: vec4<f32>,
+            @location(0) uv: vec2<f32>,
+        };
+        @vertex fn vs_main(@builtin(vertex_index) i: u32) -> Output {
+            var pos = array<vec2<f32>, 3>(
+                vec2<f32>(-1.0, -1.0),
+                vec2<f32>(3.0, -1.0),
+                vec2<f32>(-1.0, 3.0),
+            );
+            var out: Output;
+            let p = pos[i];
+            out.Position = vec4<f32>(p, 1.0, 1.0);
+            let raw = vec2<f32>((p.x + 1.0) * 0.5, (1.0 - p.y) * 0.5);
+            out.uv = (raw - 0.5) * sky.uvScale + 0.5;
+            return out;
+        }`;
+    const skyboxFragmentShader = `
+        @group(0) @binding(0) var skyTex: texture_2d<f32>;
+        @group(0) @binding(1) var skySampler: sampler;
+        @fragment fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+            var color = textureSample(skyTex, skySampler, uv).rgb * 0.5;
+            let center = uv - 0.5;
+            let vignette = 1.0 - smoothstep(0.4, 1.0, length(center) * 1.2);
+            color *= vignette;
+            return vec4<f32>(color, 1.0);
+        }`;
+    const skyboxPipeline = device.createRenderPipeline({
+        layout: 'auto',
+        vertex: {
+            module: device.createShaderModule({ code: skyboxVertexShader }),
+            entryPoint: 'vs_main',
+        },
+        fragment: {
+            module: device.createShaderModule({ code: skyboxFragmentShader }),
+            entryPoint: 'fs_main',
+            targets: [{ format: gpu.format }]
+        },
+        primitive: { topology: 'triangle-list' },
+        depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
+        multisample: { count: sampleCount }
+    });
     // Sphere pipeline — triangle-list with texture
     const sphereVertexShader = `
         struct Uniforms { mvpMatrix: mat4x4<f32> };
@@ -173,6 +233,20 @@ const Create3DObject = async (isAnimation = true) => {
     const uniformBufferSize = uniformOffset + matrixSize;
     let rotation = vec3.fromValues(0, 0, 0);
 
+    const skyboxUniformBuffer = device.createBuffer({
+        size: 16, // vec2 padded to 16 bytes
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    device.queue.writeBuffer(skyboxUniformBuffer, 0, new Float32Array(uvScale));
+    const skyboxBindGroup = device.createBindGroup({
+        layout: skyboxPipeline.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: skyboxTexture.createView() },
+            { binding: 1, resource: texSampler },
+            { binding: 2, resource: { buffer: skyboxUniformBuffer } },
+        ]
+    });
+
     const vp = CreateViewProjection(gpu.canvas.width / gpu.canvas.height);
     const modelMatrix1 = mat4.create();
     const translateMatrix1 = mat4.create();
@@ -195,7 +269,7 @@ const Create3DObject = async (isAnimation = true) => {
         -cosTheta
     );
 
-    // Physics state — sphere 1 (moon) lives in torus local frame
+    // Physics state — sphere 1 (moon) starts at (R, 0, 0)
     const sphereSpeed = 1.5;
     const spherePos = vec3.fromValues(R, 0, 0);
     const sphereVel = vec3.scale(vec3.create(), initDir, sphereSpeed);
@@ -207,15 +281,14 @@ const Create3DObject = async (isAnimation = true) => {
     const t0 = vec3.fromValues(-spherePos[2] / dxz0, 0, spherePos[0] / dxz0);
     const orbitalDir = Math.sign(vec3.dot(sphereVel, t0)) || 1;
 
-    // Physics state — sphere 2 (earth), starts after 2s delay
-    const sphere2Pos = vec3.fromValues(R, 0, 0);
+    // Physics state — sphere 2 (earth) starts 30° ahead on the torus ring
+    const ang2 = 30 * Math.PI / 180;
+    const sphere2Pos = vec3.fromValues(R * Math.cos(ang2), 0, R * Math.sin(ang2));
     const sphere2Vel = vec3.scale(vec3.create(), initDir, sphereSpeed);
     const sphere2Omega = vec3.create();
     const sphere2Quat  = quat.create();
     const sphere2OrbitalDir = orbitalDir;
-    const sphere2Delay = 2.0; // seconds
-    const startTime = performance.now();
-    let sphere2Active = false;
+    const sphere2Active = true;
 
     let lastTime = performance.now();
 
@@ -292,7 +365,7 @@ const Create3DObject = async (isAnimation = true) => {
     };
 
     // Track GPU resources for cleanup on reinit
-    prevResources = [torusVertexBuffer, sphereVertexBuffer, sphere2VertexBuffer, uniformBuffer, sphereUniformBuffer, sphere2UniformBuffer, depthTexture, moonTexture, earthTexture];
+    prevResources = [torusVertexBuffer, sphereVertexBuffer, sphere2VertexBuffer, uniformBuffer, sphereUniformBuffer, sphere2UniformBuffer, skyboxUniformBuffer, depthTexture, moonTexture, earthTexture, skyboxTexture];
     if (msaaTexture) prevResources.push(msaaTexture);
 
     function draw() {
@@ -421,11 +494,6 @@ const Create3DObject = async (isAnimation = true) => {
         }
 
         } // end sphere1 sim sub-steps loop
-
-        // Activate sphere2 after delay
-        if (!sphere2Active && (now - startTime) / 1000 >= sphere2Delay) {
-            sphere2Active = true;
-        }
 
         // Sphere 2 physics (identical logic, different radius)
         if (sphere2Active) {
@@ -585,6 +653,11 @@ const Create3DObject = async (isAnimation = true) => {
         }
         const commandEncoder = device.createCommandEncoder();
         const renderPass = commandEncoder.beginRenderPass(renderPassDescription as GPURenderPassDescriptor);
+
+        // Draw skybox first
+        renderPass.setPipeline(skyboxPipeline);
+        renderPass.setBindGroup(0, skyboxBindGroup);
+        renderPass.draw(3);
 
         renderPass.setPipeline(pipeline);
 
