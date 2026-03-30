@@ -97,7 +97,14 @@ export const CreateGPUBuffer = (device:GPUDevice, data:Float32Array,
 let cachedGPU: { device: GPUDevice; canvas: HTMLCanvasElement; format: GPUTextureFormat; context: GPUCanvasContext } | null = null;
 
 export const InitGPU = async () => {
-    if (cachedGPU) return cachedGPU;
+    if (cachedGPU) {
+        const div = document.getElementsByClassName('item2')[0] as HTMLDivElement;
+        const scaleInput = document.getElementById('render-scale') as HTMLInputElement | null;
+        const scale = scaleInput ? parseFloat(scaleInput.value) : 1;
+        cachedGPU.canvas.width  = div.offsetWidth * scale;
+        cachedGPU.canvas.height = div.offsetHeight * scale;
+        return cachedGPU;
+    }
 
     const checkgpu = CheckWebGPU();
     if(checkgpu.includes('Your current browser does not support WebGPU!')){
@@ -150,12 +157,14 @@ export const CheckWebGPU = () => {
 
     const canvas = document.getElementById('canvas-webgpu') as HTMLCanvasElement;
     const div = document.getElementsByClassName('item2')[0] as HTMLDivElement;
-    canvas.width  = div.offsetWidth;
-    canvas.height = div.offsetHeight;
+    const scaleInput = document.getElementById('render-scale') as HTMLInputElement | null;
+    const getScale = () => scaleInput ? parseFloat(scaleInput.value) : 1;
+    canvas.width  = div.offsetWidth * getScale();
+    canvas.height = div.offsetHeight * getScale();
 
     function windowResize() {
-        canvas.width  = div.offsetWidth;
-        canvas.height = div.offsetHeight;
+        canvas.width  = div.offsetWidth * getScale();
+        canvas.height = div.offsetHeight * getScale();
     };
     window.addEventListener('resize', windowResize);
     

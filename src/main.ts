@@ -18,6 +18,8 @@ const frictionVal       = document.getElementById('friction-val') as HTMLSpanEle
 const simStepsInput     = document.getElementById('sim-steps') as HTMLInputElement;
 const simStepsVal       = document.getElementById('sim-steps-val') as HTMLSpanElement;
 const msaaToggle        = document.getElementById('msaa-toggle') as HTMLInputElement;
+const renderScaleInput  = document.getElementById('render-scale') as HTMLInputElement;
+const renderScaleVal    = document.getElementById('render-scale-val') as HTMLSpanElement;
 const velMagEl   = document.getElementById('vel-mag')!;
 const velXEl     = document.getElementById('vel-x')!;
 const velYEl     = document.getElementById('vel-y')!;
@@ -485,5 +487,10 @@ simStepsInput.addEventListener('input', () => {
 });
 
 msaaToggle.addEventListener('change', () => {
+    Create3DObject(true);
+});
+
+renderScaleInput.addEventListener('input', () => {
+    renderScaleVal.textContent = renderScaleInput.value;
     Create3DObject(true);
 });
