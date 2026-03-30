@@ -86,7 +86,7 @@ Each sphere has four state variables:
 - Drag horizontally on canvas → accumulates `dragAngle` (Y-axis rotation)
 - On release → `dragSpeed = lastDragDx * dragSensitivity`, decays with `dragDamping = 0.98`
 - Applied to torus visual only via `mat4.fromYRotation(dragMat, dragAngle)`
-- Spheres are unaffected — they use `torusRotationMatrix` (tumble only)
+- Spheres are unaffected — they use `torusRotationMatrix` (tumble only) — **this is intentional**: drag is a view-orbit control, not a physics input
 
 ### UI controls
 All sliders live in `dist/index.html`. Controls that change geometry call `Create3DObject(true)` to rebuild GPU buffers.

@@ -468,15 +468,17 @@ const Create3DObject = async (isAnimation = true) => {
 
         const simSteps = parseInt(simStepsInput.value);
         const subDt = dt;
+        const v_min_orbital = 0.3;
         for (let step = 0; step < simSteps; step++) {
 
         spherePos[0] += sphereVel[0] * subDt;
         spherePos[1] += sphereVel[1] * subDt;
         spherePos[2] += sphereVel[2] * subDt;
 
-        // Nearest point on torus central circle (in XZ plane)
+        // Nearest point on torus central circle (in XZ plane, so cy = 0)
         const dxz = Math.sqrt(spherePos[0] ** 2 + spherePos[2] ** 2);
         const cx = dxz > 0 ? R * spherePos[0] / dxz : R;
+        const cy = 0;
         const cz = dxz > 0 ? R * spherePos[2] / dxz : 0;
 
         // Small tangential nudge aligned with current direction of travel (eps=0 to disable)
@@ -493,7 +495,7 @@ const Create3DObject = async (isAnimation = true) => {
 
         // Vector from tube centerline to sphere center
         const nx = spherePos[0] - cx;
-        const ny = spherePos[1];
+        const ny = spherePos[1] - cy;
         const nz = spherePos[2] - cz;
         const distTube = Math.sqrt(nx * nx + ny * ny + nz * nz);
 
@@ -505,7 +507,7 @@ const Create3DObject = async (isAnimation = true) => {
 
             // Push sphere back to surface
             spherePos[0] = cx + n[0] * maxDist;
-            spherePos[1] = n[1] * maxDist;
+            spherePos[1] = cy + n[1] * maxDist;
             spherePos[2] = cz + n[2] * maxDist;
 
             // r_c = sphereRadius * n (sphere center → contact point)
@@ -544,7 +546,6 @@ const Create3DObject = async (isAnimation = true) => {
         }
 
         // Orbital floor: ensure sphere keeps moving around the torus in its original direction
-        const v_min_orbital = 0.3;
         const dxzNow = Math.sqrt(spherePos[0] ** 2 + spherePos[2] ** 2);
         if (dxzNow > 0) {
             const t_orb = vec3.fromValues(-spherePos[2] / dxzNow, 0, spherePos[0] / dxzNow);
@@ -580,10 +581,11 @@ const Create3DObject = async (isAnimation = true) => {
 
         const dxz2 = Math.sqrt(sphere2Pos[0] ** 2 + sphere2Pos[2] ** 2);
         const cx2 = dxz2 > 0 ? R * sphere2Pos[0] / dxz2 : R;
+        const cy2 = 0;
         const cz2 = dxz2 > 0 ? R * sphere2Pos[2] / dxz2 : 0;
 
         const nx2 = sphere2Pos[0] - cx2;
-        const ny2 = sphere2Pos[1];
+        const ny2 = sphere2Pos[1] - cy2;
         const nz2 = sphere2Pos[2] - cz2;
         const distTube2 = Math.sqrt(nx2 * nx2 + ny2 * ny2 + nz2 * nz2);
 
@@ -593,7 +595,7 @@ const Create3DObject = async (isAnimation = true) => {
             const n2 = vec3.fromValues(nx2 * inv2, ny2 * inv2, nz2 * inv2);
 
             sphere2Pos[0] = cx2 + n2[0] * maxDist2;
-            sphere2Pos[1] = n2[1] * maxDist2;
+            sphere2Pos[1] = cy2 + n2[1] * maxDist2;
             sphere2Pos[2] = cz2 + n2[2] * maxDist2;
 
             const r_c2 = vec3.scale(vec3.create(), n2, sphere2Radius);
@@ -624,8 +626,8 @@ const Create3DObject = async (isAnimation = true) => {
         if (dxzNow2 > 0) {
             const t_orb2 = vec3.fromValues(-sphere2Pos[2] / dxzNow2, 0, sphere2Pos[0] / dxzNow2);
             const v_orb2 = vec3.dot(sphere2Vel, t_orb2) * sphere2OrbitalDir;
-            if (v_orb2 < 0.3) {
-                vec3.scaleAndAdd(sphere2Vel, sphere2Vel, t_orb2, sphere2OrbitalDir * (0.3 - v_orb2));
+            if (v_orb2 < v_min_orbital) {
+                vec3.scaleAndAdd(sphere2Vel, sphere2Vel, t_orb2, sphere2OrbitalDir * (v_min_orbital - v_orb2));
             }
         }
 
