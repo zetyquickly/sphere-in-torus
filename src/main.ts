@@ -44,7 +44,7 @@ const Create3DObject = async (isAnimation = true) => {
     let r = parseFloat(tubeRadiusInput.value);
     let N = 20, n = 10;
     const sphere2Radius = parseFloat(sphereRadiusInput.value);
-    let sphereRadius = sphere2Radius * 0.33;
+    let sphereRadius = sphere2Radius * 0.4;
     const sampleCount = msaaToggle.checked ? 4 : 1;
     const torusTubeData = TorusTubeData(R, r, N, n, 0.025, 12);
     const sphereSolidData = SphereSolidData(sphereRadius, 40, 40) as Float32Array;
@@ -189,23 +189,54 @@ const Create3DObject = async (isAnimation = true) => {
     });
     // Sphere pipeline — triangle-list with texture
     const sphereVertexShader = `
-        struct Uniforms { mvpMatrix: mat4x4<f32> };
+        struct Uniforms {
+            mvpMatrix   : mat4x4<f32>,
+            modelMatrix : mat4x4<f32>,
+        };
         @group(0) @binding(0) var<uniform> uniforms: Uniforms;
         struct Output {
-            @builtin(position) Position: vec4<f32>,
-            @location(0) vUV: vec2<f32>,
+            @builtin(position) Position : vec4<f32>,
+            @location(0) vUV           : vec2<f32>,
+            @location(1) worldPos      : vec3<f32>,
+            @location(2) worldNormal   : vec3<f32>,
         };
         @vertex fn vs_main(@location(0) pos: vec3<f32>, @location(1) uv: vec2<f32>) -> Output {
             var out: Output;
-            out.Position = uniforms.mvpMatrix * vec4<f32>(pos, 1.0);
-            out.vUV = uv;
+            out.Position    = uniforms.mvpMatrix * vec4<f32>(pos, 1.0);
+            out.vUV         = uv;
+            out.worldPos    = (uniforms.modelMatrix * vec4<f32>(pos, 1.0)).xyz;
+            out.worldNormal = normalize((uniforms.modelMatrix * vec4<f32>(normalize(pos), 0.0)).xyz);
             return out;
         }`;
     const sphereFragmentShader = `
-        @group(0) @binding(1) var moonTex: texture_2d<f32>;
-        @group(0) @binding(2) var texSampler: sampler;
-        @fragment fn fs_main(@location(0) vUV: vec2<f32>) -> @location(0) vec4<f32> {
-            return textureSample(moonTex, texSampler, vUV);
+        @group(0) @binding(1) var surfaceTex : texture_2d<f32>;
+        @group(0) @binding(2) var texSampler  : sampler;
+        @group(0) @binding(3) var envTex      : texture_2d<f32>;
+        @fragment fn fs_main(
+            @location(0) vUV        : vec2<f32>,
+            @location(1) worldPos   : vec3<f32>,
+            @location(2) worldNormal: vec3<f32>
+        ) -> @location(0) vec4<f32> {
+            let N = normalize(worldNormal);
+            let V = normalize(vec3<f32>(2.0, 2.0, 4.0) - worldPos);
+            let R = reflect(-V, N);
+
+            // Equirectangular env sample (same dimming as skybox)
+            let eu = atan2(R.z, R.x) * 0.15915494 + 0.5;
+            let ev = asin(clamp(R.y, -1.0, 1.0)) * 0.31830989 + 0.5;
+            let envUV = vec2<f32>(eu, 1.0 - ev);
+            var envColor = textureSample(envTex, texSampler, envUV).rgb * 0.5;
+            let envCenter = envUV - 0.5;
+            let envVignette = 1.0 - smoothstep(0.4, 1.0, length(envCenter) * 1.2);
+            envColor *= envVignette;
+
+            // Fresnel-Schlick (non-metallic, F0 ~0.04)
+            let F0 = vec3<f32>(0.04, 0.04, 0.04);
+            let fresnel = F0 + (1.0 - F0) * pow(1.0 - max(dot(N, V), 0.0), 5.0);
+
+            let albedo = textureSample(surfaceTex, texSampler, vUV).rgb;
+            let color = albedo + fresnel * envColor * 2.0;
+            return vec4<f32>(color, 1.0);
         }`;
     const spherePipeline = device.createRenderPipeline({
         layout: 'auto',
@@ -259,7 +290,7 @@ const Create3DObject = async (isAnimation = true) => {
     const modelViewProjectionMatrix3 = mat4.create() as Float32Array;
 
     // Shared initial direction for both spheres
-    const halfAngle = Math.PI / 6;
+    const halfAngle = Math.PI / 12;
     const phi = Math.random() * 2 * Math.PI;
     const cosTheta = Math.cos(halfAngle) + Math.random() * (1 - Math.cos(halfAngle));
     const sinTheta = Math.sqrt(1 - cosTheta * cosTheta);
@@ -292,6 +323,33 @@ const Create3DObject = async (isAnimation = true) => {
 
     let lastTime = performance.now();
 
+    // Drag interaction — orbit spin (Y axis only)
+    let dragAngle = 0;       // accumulated Y rotation
+    let dragSpeed = 0;       // angular velocity (rad/frame)
+    let isDragging = false;
+    let lastMouseX = 0;
+    let lastDragDx = 0;
+    const dragSensitivity = 0.005;
+    const dragDamping = 0.98;
+
+    gpu.canvas.addEventListener('mousedown', (e: MouseEvent) => {
+        isDragging = true;
+        lastMouseX = e.clientX;
+        lastDragDx = 0;
+        dragSpeed = 0;
+    });
+    window.addEventListener('mousemove', (e: MouseEvent) => {
+        if (!isDragging) return;
+        lastDragDx = e.clientX - lastMouseX;
+        lastMouseX = e.clientX;
+        dragAngle += lastDragDx * dragSensitivity;
+    });
+    window.addEventListener('mouseup', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        dragSpeed = lastDragDx * dragSensitivity;
+    });
+
     // Create uniform buffer and layout
     const uniformBuffer = device.createBuffer({
         size: uniformBufferSize,
@@ -315,7 +373,7 @@ const Create3DObject = async (isAnimation = true) => {
     });
 
     const sphereUniformBuffer = device.createBuffer({
-        size: matrixSize,
+        size: matrixSize * 2,   // mvpMatrix + modelMatrix
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
     const sphereBindGroup = device.createBindGroup({
@@ -324,11 +382,12 @@ const Create3DObject = async (isAnimation = true) => {
             { binding: 0, resource: { buffer: sphereUniformBuffer } },
             { binding: 1, resource: moonTexture.createView() },
             { binding: 2, resource: texSampler },
+            { binding: 3, resource: skyboxTexture.createView() },
         ]
     });
 
     const sphere2UniformBuffer = device.createBuffer({
-        size: matrixSize,
+        size: matrixSize * 2,   // mvpMatrix + modelMatrix
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
     const sphere2BindGroup = device.createBindGroup({
@@ -337,6 +396,7 @@ const Create3DObject = async (isAnimation = true) => {
             { binding: 0, resource: { buffer: sphere2UniformBuffer } },
             { binding: 1, resource: earthTexture.createView() },
             { binding: 2, resource: texSampler },
+            { binding: 3, resource: skyboxTexture.createView() },
         ]
     });
 
@@ -374,6 +434,12 @@ const Create3DObject = async (isAnimation = true) => {
 
     function draw() {
 
+        // Apply drag momentum when not dragging
+        if (!isDragging) {
+            dragAngle += dragSpeed;
+            dragSpeed *= dragDamping;
+        }
+
         // Transforms on the first object (torus)
         mat4.rotate(
             modelMatrix1,
@@ -381,14 +447,19 @@ const Create3DObject = async (isAnimation = true) => {
             1,
             vec3.fromValues(Math.sin(2 * rotation[0]), Math.cos(2 * rotation[1]), 0)
         );
-        mat4.multiply(modelViewProjectionMatrix1, vp.viewMatrix, modelMatrix1);
-        mat4.multiply(modelViewProjectionMatrix1, vp.projectionMatrix, modelViewProjectionMatrix1);
 
-       // Extract the rotation matrix from modelMatrix1
+        // Extract physics rotation (tumble only, no drag) — spheres live in this frame
         const torusRotationQuat = quat.create();
         mat4.getRotation(torusRotationQuat, modelMatrix1);
         const torusRotationMatrix = mat4.create();
         mat4.fromQuat(torusRotationMatrix, torusRotationQuat);
+
+        // Apply orbit spin from drag (Y axis) — torus visual only
+        const dragMat = mat4.fromYRotation(mat4.create(), dragAngle);
+        mat4.multiply(modelMatrix1, modelMatrix1, dragMat);
+
+        mat4.multiply(modelViewProjectionMatrix1, vp.viewMatrix, modelMatrix1);
+        mat4.multiply(modelViewProjectionMatrix1, vp.projectionMatrix, modelViewProjectionMatrix1);
 
         // Physics update
         const now = performance.now();
@@ -631,6 +702,12 @@ const Create3DObject = async (isAnimation = true) => {
             modelViewProjectionMatrix2.byteOffset,
             modelViewProjectionMatrix2.byteLength
         );
+        device.queue.writeBuffer(
+            sphereUniformBuffer, matrixSize,
+            (modelMatrix2 as any).buffer as ArrayBuffer,
+            (modelMatrix2 as any).byteOffset,
+            (modelMatrix2 as any).byteLength
+        );
 
         // Sphere 2 transform
         if (sphere2Active) {
@@ -646,6 +723,12 @@ const Create3DObject = async (isAnimation = true) => {
                 modelViewProjectionMatrix3.buffer,
                 modelViewProjectionMatrix3.byteOffset,
                 modelViewProjectionMatrix3.byteLength
+            );
+            device.queue.writeBuffer(
+                sphere2UniformBuffer, matrixSize,
+                (modelMatrix3 as any).buffer as ArrayBuffer,
+                (modelMatrix3 as any).byteOffset,
+                (modelMatrix3 as any).byteLength
             );
         }
 
@@ -719,6 +802,7 @@ sphereRadiusInput.addEventListener('input', () => {
 tumbleSpeedInput.addEventListener('input', () => {
     tumbleSpeedVal.textContent = tumbleSpeedInput.value;
 });
+
 
 frictionInput.addEventListener('input', () => {
     frictionVal.textContent = frictionInput.value;
