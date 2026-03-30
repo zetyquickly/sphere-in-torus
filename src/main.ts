@@ -300,14 +300,18 @@ const Create3DObject = async (isAnimation = true) => {
 
     const uniformBindGroup1 = device.createBindGroup({
         layout: pipeline.getBindGroupLayout(0),
-        entries: [{
-            binding: 0,
-            resource: {
-                buffer: uniformBuffer,
-                offset: 0,
-                size: matrixSize * 2   // mvpMatrix + modelMatrix
-            }
-        }]
+        entries: [
+            {
+                binding: 0,
+                resource: {
+                    buffer: uniformBuffer,
+                    offset: 0,
+                    size: matrixSize * 2   // mvpMatrix + modelMatrix
+                }
+            },
+            { binding: 1, resource: skyboxTexture.createView() },
+            { binding: 2, resource: texSampler },
+        ]
     });
 
     const sphereUniformBuffer = device.createBuffer({
