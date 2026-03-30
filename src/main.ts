@@ -17,6 +17,7 @@ const frictionInput     = document.getElementById('friction') as HTMLInputElemen
 const frictionVal       = document.getElementById('friction-val') as HTMLSpanElement;
 const simStepsInput     = document.getElementById('sim-steps') as HTMLInputElement;
 const simStepsVal       = document.getElementById('sim-steps-val') as HTMLSpanElement;
+const msaaToggle        = document.getElementById('msaa-toggle') as HTMLInputElement;
 const velMagEl   = document.getElementById('vel-mag')!;
 const velXEl     = document.getElementById('vel-x')!;
 const velYEl     = document.getElementById('vel-y')!;
@@ -41,7 +42,8 @@ const Create3DObject = async (isAnimation = true) => {
     let r = parseFloat(tubeRadiusInput.value);
     let N = 20, n = 10;
     let sphereRadius = parseFloat(sphereRadiusInput.value);
-    const torusTubeData = TorusTubeData(R, r, N, n);
+    const sampleCount = msaaToggle.checked ? 4 : 1;
+    const torusTubeData = TorusTubeData(R, r, N, n, 0.025, 12);
     const sphereSolidData = SphereSolidData(sphereRadius, 40, 40) as Float32Array;
 
     // Create vertex buffers
@@ -94,6 +96,9 @@ const Create3DObject = async (isAnimation = true) => {
             format: "depth24plus",
             depthWriteEnabled: true,
             depthCompare: "less"
+        },
+        multisample: {
+            count: sampleCount,
         }
     });
 
@@ -143,7 +148,8 @@ const Create3DObject = async (isAnimation = true) => {
             targets: [{ format: gpu.format }]
         },
         primitive: { topology: 'triangle-list', cullMode: 'back' },
-        depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' }
+        depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
+        multisample: { count: sampleCount }
     });
 
     // Create uniform data
@@ -217,16 +223,23 @@ const Create3DObject = async (isAnimation = true) => {
         ]
     });
 
-    let textureView = gpu.context.getCurrentTexture().createView();
+    const msaaTexture = sampleCount > 1 ? device.createTexture({
+        size: [gpu.canvas.width, gpu.canvas.height, 1],
+        format: gpu.format,
+        sampleCount,
+        usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    }) : null;
     const depthTexture = device.createTexture({
         size: [gpu.canvas.width, gpu.canvas.height, 1],
         format: "depth24plus",
+        sampleCount,
         usage: GPUTextureUsage.RENDER_ATTACHMENT
     });
     const renderPassDescription = {
         colorAttachments: [{
-            view: textureView,
-            clearValue: { r: 0.2, g: 0.247, b: 0.314, a: 1.0 }, // Background color
+            view: msaaTexture ? msaaTexture.createView() : gpu.context.getCurrentTexture().createView(),
+            resolveTarget: msaaTexture ? gpu.context.getCurrentTexture().createView() : undefined,
+            clearValue: { r: 0.2, g: 0.247, b: 0.314, a: 1.0 },
             loadOp: 'clear',
             storeOp: 'store'
         }],
@@ -240,6 +253,7 @@ const Create3DObject = async (isAnimation = true) => {
 
     // Track GPU resources for cleanup on reinit
     prevResources = [torusVertexBuffer, sphereVertexBuffer, uniformBuffer, sphereUniformBuffer, depthTexture, moonTexture];
+    if (msaaTexture) prevResources.push(msaaTexture);
 
     function draw() {
 
@@ -403,8 +417,12 @@ const Create3DObject = async (isAnimation = true) => {
             modelViewProjectionMatrix2.byteLength
         );
 
-        textureView = gpu.context.getCurrentTexture().createView();
-        renderPassDescription.colorAttachments[0].view = textureView;
+        const swapView = gpu.context.getCurrentTexture().createView();
+        if (msaaTexture) {
+            renderPassDescription.colorAttachments[0].resolveTarget = swapView;
+        } else {
+            renderPassDescription.colorAttachments[0].view = swapView;
+        }
         const commandEncoder = device.createCommandEncoder();
         const renderPass = commandEncoder.beginRenderPass(renderPassDescription as GPURenderPassDescriptor);
 
@@ -464,4 +482,8 @@ frictionInput.addEventListener('input', () => {
 
 simStepsInput.addEventListener('input', () => {
     simStepsVal.textContent = simStepsInput.value;
+});
+
+msaaToggle.addEventListener('change', () => {
+    Create3DObject(true);
 });
