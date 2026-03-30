@@ -499,6 +499,30 @@ const Create3DObject = async (isAnimation = true) => {
         }
 
         } // end sphere2 sim sub-steps loop
+
+        // Sphere-sphere collision (moon mass=1, earth mass=3)
+        const sep = vec3.sub(vec3.create(), spherePos, sphere2Pos);
+        const dist = vec3.length(sep);
+        const minDist = sphereRadius + sphere2Radius;
+        if (dist < minDist && dist > 1e-6) {
+            const cn = vec3.scale(vec3.create(), sep, 1 / dist);
+
+            // Push apart
+            const overlap = minDist - dist;
+            const m1 = 1, m2 = 3;
+            vec3.scaleAndAdd(spherePos, spherePos, cn, overlap * m2 / (m1 + m2));
+            vec3.scaleAndAdd(sphere2Pos, sphere2Pos, cn, -overlap * m1 / (m1 + m2));
+
+            // Elastic impulse
+            const vRel = vec3.sub(vec3.create(), sphereVel, sphere2Vel);
+            const vn = vec3.dot(vRel, cn);
+            if (vn < 0) {
+                const J = -(1 + 1) * vn / (1 / m1 + 1 / m2);
+                vec3.scaleAndAdd(sphereVel, sphereVel, cn, J / m1);
+                vec3.scaleAndAdd(sphere2Vel, sphere2Vel, cn, -J / m2);
+            }
+        }
+
         } // end sphere2Active check
 
         // Update realtime display
