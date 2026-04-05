@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<head>
+   <meta charset="utf-8">
+   <meta http-equiv="X-UA-Compatible" content="IE=edge">
+   <title>Sphere in Torus</title>
+   <meta name="viewport" content="width=device-width, initial-scale=1">
+   <style>
+      body, html { margin: 0; padding: 0; overflow: hidden; background: black; }
+      .item2 { position: fixed; inset: 0; }
+      #canvas-webgpu { width: 100%; height: 100%; display: block; }
+      #hidden-ui { display: none; }
+   </style>
+</head>
+<body>
+   <!-- .item2 must be visible in layout so offsetWidth/Height work for canvas sizing -->
+   <div class="item2">
+      <canvas id="canvas-webgpu"></canvas>
+   </div>
+   <!-- All other inputs required by the bundle, hidden -->
+   <div id="hidden-ui">
+      <input id="major-radius"    type="range" value="2.5">
+      <span  id="major-radius-val"></span>
+      <input id="tube-radius"     type="range" value="0.6">
+      <span  id="tube-radius-val"></span>
+      <input id="sphere-radius"   type="range" value="0.41">
+      <span  id="sphere-radius-val"></span>
+      <input id="tumble-speed"    type="range" value="0.001">
+      <span  id="tumble-speed-val"></span>
+      <input id="sim-steps"       type="range" value="1">
+      <span  id="sim-steps-val"></span>
+      <input id="friction"        type="range" value="0.01">
+      <span  id="friction-val"></span>
+      <input id="msaa-toggle"     type="checkbox" checked>
+      <input id="render-scale"    type="range" value="1">
+      <span  id="render-scale-val"></span>
+      <span  id="vel-mag"></span>
+      <span  id="vel-x"></span>
+      <span  id="vel-y"></span>
+      <span  id="vel-z"></span>
+      <span  id="omega-mag"></span>
+      <span  id="omega-x"></span>
+      <span  id="omega-y"></span>
+      <span  id="omega-z"></span>
+   </div>
+   <script src="main.bundle.js"></script>
+</body>
+</html>
