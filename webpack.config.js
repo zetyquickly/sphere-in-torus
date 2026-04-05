@@ -1,4 +1,5 @@
 const path = require("path");
+const CopyPlugin = require("copy-webpack-plugin");
 const bundleOutputDir = "./dist";
 
 module.exports = {
@@ -10,6 +11,9 @@ module.exports = {
         path: path.join(__dirname, bundleOutputDir),
         publicPath: 'public/dist/'
     },
+    plugins: [
+        new CopyPlugin({ patterns: [{ from: "assets", to: "assets" }] }),
+    ],
     devtool: "source-map",
     resolve: {
         extensions: ['.js', '.ts']
