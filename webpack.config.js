@@ -9,7 +9,7 @@ module.exports = {
     output: {
         filename: "[name].bundle.js",
         path: path.join(__dirname, bundleOutputDir),
-        publicPath: 'public/dist/'
+        publicPath: ''
     },
     plugins: [
         new CopyPlugin({ patterns: [{ from: "assets", to: "assets" }] }),
