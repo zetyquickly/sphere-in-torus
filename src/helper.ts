@@ -113,7 +113,18 @@ export const InitGPU = async () => {
     }
     const canvas = document.getElementById('canvas-webgpu') as HTMLCanvasElement;
     const adapter = await navigator.gpu?.requestAdapter();
-    const device = await adapter?.requestDevice() as GPUDevice;
+    if (!adapter) {
+        // navigator.gpu exists (CheckWebGPU passed) but no adapter came back.
+        // Seen when a privacy/ad-blocking extension suppresses GPU access to
+        // reduce fingerprinting, even though the browser/driver fully support
+        // WebGPU (chrome://gpu can show WebGPU as available while this still
+        // happens, since that page is privileged and extensions can't touch it).
+        throw new Error('WebGPU is available in this browser, but no GPU adapter was granted to this page. This is commonly caused by a privacy or ad-blocking browser extension restricting GPU access. Try disabling it for this site, or reload in a private window with extensions off.');
+    }
+    const device = await adapter.requestDevice();
+    if (!device) {
+        throw new Error('A WebGPU adapter was found, but requesting a GPU device from it failed.');
+    }
     const context = canvas.getContext('webgpu') as GPUCanvasContext;
     const format = navigator.gpu.getPreferredCanvasFormat();
     context.configure({

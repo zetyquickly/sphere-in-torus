@@ -32,6 +32,31 @@ const omegaZEl   = document.getElementById('omega-z')!;
 // --- GPU resource tracking ---
 let prevResources: { destroy(): void }[] = [];
 
+// Shows a fatal error in-page instead of letting it disappear as an
+// unhandled promise rejection, which previously left visitors staring at a
+// blank canvas with no indication anything had gone wrong.
+function showFatalError(message: string) {
+    let el = document.getElementById('webgpu-fatal-error');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'webgpu-fatal-error';
+        el.style.cssText = `
+            position: fixed; inset: 0; z-index: 1000;
+            display: flex; align-items: center; justify-content: center;
+            padding: 2rem; box-sizing: border-box;
+            background: #111318; color: #e6e6e6;
+            font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            text-align: center;
+        `;
+        document.body.appendChild(el);
+    }
+    el.innerHTML = `<div style="max-width: 440px;">${message}</div>`;
+}
+
+function clearFatalError() {
+    document.getElementById('webgpu-fatal-error')?.remove();
+}
+
 const Create3DObject = async (isAnimation = true) => {
     // Destroy previous GPU resources
     for (const res of prevResources) res.destroy();
@@ -776,13 +801,24 @@ const Create3DObject = async (isAnimation = true) => {
     CreateAnimation(draw, rotation, isAnimation, () => parseFloat(tumbleSpeedInput.value));
 }
 
-Create3DObject(true);
+async function tryCreate3DObject(isAnimation = true) {
+    try {
+        await Create3DObject(isAnimation);
+        clearFatalError();
+    } catch (err) {
+        console.error(err);
+        const message = err instanceof Error ? err.message : String(err);
+        showFatalError(message);
+    }
+}
 
-window.addEventListener('resize', () => Create3DObject(true));
+tryCreate3DObject(true);
+
+window.addEventListener('resize', () => tryCreate3DObject(true));
 
 majorRadiusInput.addEventListener('input', () => {
     majorRadiusVal.textContent = majorRadiusInput.value;
-    Create3DObject(true);
+    tryCreate3DObject(true);
 });
 
 tubeRadiusInput.addEventListener('input', () => {
@@ -793,12 +829,12 @@ tubeRadiusInput.addEventListener('input', () => {
         sphereRadiusInput.value = String((r - 0.05).toFixed(2));
         sphereRadiusVal.textContent = sphereRadiusInput.value;
     }
-    Create3DObject(true);
+    tryCreate3DObject(true);
 });
 
 sphereRadiusInput.addEventListener('input', () => {
     sphereRadiusVal.textContent = sphereRadiusInput.value;
-    Create3DObject(true);
+    tryCreate3DObject(true);
 });
 
 tumbleSpeedInput.addEventListener('input', () => {
@@ -815,10 +851,10 @@ simStepsInput.addEventListener('input', () => {
 });
 
 msaaToggle.addEventListener('change', () => {
-    Create3DObject(true);
+    tryCreate3DObject(true);
 });
 
 renderScaleInput.addEventListener('input', () => {
     renderScaleVal.textContent = renderScaleInput.value;
-    Create3DObject(true);
+    tryCreate3DObject(true);
 });
